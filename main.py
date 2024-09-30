@@ -1,7 +1,7 @@
 import requests
 import time
 import json
-# ------------ توكن ------------
+
 API_KEY = '7696110235:AAGfHSLfVvH3VUMLahzHNWhHATYuKmxgNkE'
 API_URL = f"https://api.telegram.org/bot{API_KEY}/"
 
