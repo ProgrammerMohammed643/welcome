@@ -1,4 +1,3 @@
-requests
-json
-time
-pyrogram
+pyTelegramBotAPI
+yt-dlp
+ffmpeg-python
