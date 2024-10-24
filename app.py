@@ -1,59 +1,106 @@
-import telebot
-import yt_dlp as youtube_dl
-import os
-import tempfile
+import requests
 import time
+import json
 
-TOKEN = '7094935198:AAERe_rYPVRGIDnZgkXxZklb7-d42RUKA-o'
-bot = telebot.TeleBot(TOKEN)
+API_KEY = '7696110235:AAGfHSLfVvH3VUMLahzHNWhHATYuKmxgNkE'
+API_URL = f"https://api.telegram.org/bot{API_KEY}/"
 
-def download_youtube_video(url):
-    ydl_opts = {
-        'format': 'best[ext=mp4]',
-        'outtmpl': os.path.join(tempfile.gettempdir(), 'downloaded_video.%(ext)s'),
-        'noplaylist': True,
-    }
-    with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-        ydl.download([url])
-        for file in os.listdir(tempfile.gettempdir()):
-            if file.startswith('downloaded_video'):
-                return os.path.join(tempfile.gettempdir(), file)
+def bot(method, datas=None):
+    url = API_URL + method
+    try:
+        response = requests.post(url, data=datas, timeout=5)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.Timeout:
+        print("Timeout error: The request took too long to complete.")
+    except requests.exceptions.ConnectionError:
+        print("Connection error: Failed to connect to the server.")
+    except requests.exceptions.HTTPError as err:
+        print(f"HTTP error occurred: {err}")
+    except requests.exceptions.RequestException as err:
+        print(f"An unexpected error occurred: {err}")
     return None
 
-def compress_video(input_file):
-    output_file = os.path.splitext(input_file)[0] + "_compressed.mp4"
-    os.system(f'ffmpeg -i "{input_file}" -vcodec libx264 -crf 28 "{output_file}"')
-    return output_file
+def handle_update(update):
+    message = update.get('message')
+    if not message:
+        return
+    
+    from_id = message['from']['id']
+    chat_id = message['chat']['id']
+    
+    if 'new_chat_members' in message:
+        for new_member in message['new_chat_members']:
+            chat_administrators = bot("getChatAdministrators", {'chat_id': chat_id})
+            
+            if chat_administrators:
+                a_id = ""
+                for admin in chat_administrators['result']:
+                    if admin['status'] == "creator":
+                        a_id = admin['user']['id']
+                        break
 
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    bot.reply_to(message, "أرسل لي رابط فيديو يوتيوب لتنزيله.")
+                user_profile_photos = bot("getUserProfilePhotos", {'user_id': a_id, 'limit': 1})
+                file_id = None
+                if user_profile_photos and user_profile_photos.get('result'):
+                    file_id = user_profile_photos['result']['photos'][0][0]['file_id']
 
-@bot.message_handler(func=lambda message: 'youtube.com' in message.text or 'youtu.be' in message.text)
-def handle_youtube_link(message):
-    url = message.text
-    try:
-        bot.reply_to(message, "جاري تنزيل الفيديو، انتظر قليلاً...")
-        video_path = download_youtube_video(url)
+                chat_info = bot("getChat", {'chat_id': a_id})
+                if chat_info:
+                    chat_title = message['chat']['title']
+                    new_member_name = new_member['first_name']
+                    msg = f"- نورت ياا قمر 🌗😘🤝 [{new_member_name}](tg://user?id={new_member['id']})\n│ \n└ʙʏ في {chat_title}"
 
-        if video_path and os.path.exists(video_path):
-            compressed_video_path = compress_video(video_path)
-            video_size = os.path.getsize(compressed_video_path) / (1024 * 1024)
+                    keyboard = {
+                        "inline_keyboard": [
+                            [{"text": "مـالـك الـجـروب⚡️", "url": f"tg://user?id={chat_info['result']['id']}"}],
+                            [{"text": "خدني لجروبك والنبي🥺♥️", "url": f"https://t.me/{bot('getMe')['result']['username']}?startgroup=True"}]
+                        ]
+                    }
 
-            if video_size > 50:
-                bot.reply_to(message, f"حجم الفيديو {video_size:.2f} ميغابايت. الحد الأقصى هو 50 ميغابايت.")
-                os.remove(video_path)
-                os.remove(compressed_video_path)
-            else:
-                time.sleep(1)  # تأخير لمدة ثانية قبل الإرسال
-                with open(compressed_video_path, 'rb') as video:
-                    bot.send_video(message.chat.id, video, caption="ها هو الفيديو الذي طلبته!")
-                os.remove(video_path)
-                os.remove(compressed_video_path)
-        else:
-            bot.reply_to(message, "حدث خطأ في تنزيل الفيديو.")
-    except Exception as e:
-        bot.reply_to(message, f"حدث خطأ: {str(e)}")
+                    if file_id:
+                        bot('sendPhoto', {
+                            'chat_id': chat_id,
+                            'photo': file_id,
+                            'caption': msg,
+                            'reply_to_message_id': message['message_id'],
+                            'reply_markup': json.dumps(keyboard),
+                            'parse_mode': "Markdown"
+                        })
+                    else:
+                        bot('sendMessage', {
+                            'chat_id': chat_id,
+                            'text': msg,
+                            'reply_to_message_id': message['message_id'],
+                            'reply_markup': json.dumps(keyboard),
+                            'parse_mode': "Markdown"
+                        })
 
-telebot.apihelper.TIMEOUT = 300  # زيادة المهلة إلى 300 ثانية
-bot.polling()
+def get_updates(offset=None):
+    params = {'timeout': 100, 'offset': offset}
+    response = bot("getUpdates", params)
+    if response:
+        return response.get('result', [])
+    return []
+
+def process_updates():
+    offset = None
+    retry_count = 0
+    while True:
+        try:
+            updates = get_updates(offset)
+            for update in updates:
+                handle_update(update)
+                offset = update['update_id'] + 1
+            retry_count = 0
+        except requests.exceptions.ConnectionError:
+            retry_count += 1
+            wait_time = min(60, 5 * retry_count)
+            print(f"Connection error. Retrying in {wait_time} seconds...")
+            time.sleep(wait_time)
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    process_updates()
